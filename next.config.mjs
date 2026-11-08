@@ -1,18 +1,37 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  async headers() {
+  async rewrites() {
     return [
       {
-        source: "/api/:path*",
-        headers: [
-          { key: "Access-Control-Allow-Origin", value: "*" },
-          { key: "Access-Control-Allow-Methods", value: "GET, POST, OPTIONS" },
+        source: "/mcp",
+        destination: "/api/mcp"
+      },
+      {
+        source: "/sse",
+        destination: "/api/mcp"
+      },
+      {
+        source: "/",
+        has: [
           {
-            key: "Access-Control-Allow-Headers",
-            value: "Content-Type, Authorization, x-socrata-app-token, X-App-Token, mcp-session-id"
+            type: "header",
+            key: "content-type",
+            value: ".*application/json.*"
           }
-        ]
+        ],
+        destination: "/api/mcp"
+      },
+      {
+        source: "/",
+        has: [
+          {
+            type: "header",
+            key: "accept",
+            value: ".*text/event-stream.*"
+          }
+        ],
+        destination: "/api/mcp"
       }
     ];
   }

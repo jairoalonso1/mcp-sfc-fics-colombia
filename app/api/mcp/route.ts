@@ -12,17 +12,15 @@ export const dynamic = "force-dynamic";
 
 const SERVER_INFO = {
   name: "mcp-sfc-fics-colombia",
-  version: "1.0.0",
-  description:
-    "Servidor MCP (Model Context Protocol) sobre HTTPS para análisis cuantitativo e institucional de Fondos de Inversión Colectiva (FICs) y FCPs de la Superintendencia Financiera de Colombia (datos.gov.co / qhpu-8ixx)."
+  version: "1.0.0"
 };
 
-const CORS_HEADERS = {
+const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, x-socrata-app-token, X-App-Token, mcp-session-id, Accept",
-  "Access-Control-Expose-Headers": "mcp-session-id"
+    "Content-Type, Authorization, x-socrata-app-token, X-App-Token, mcp-session-id, Mcp-Session-Id, Accept, Last-Event-ID",
+  "Access-Control-Expose-Headers": "mcp-session-id, Mcp-Session-Id"
 };
 
 function extractUserSocrataToken(req: NextRequest): string | null {
@@ -63,27 +61,33 @@ async function handleJsonRpcMessage(
 
   const { id, method, params } = msg;
 
-  // Notifications (sin id) no requieren respuesta JSON-RPC
+  // Notificaciones JSON-RPC (ej. notifications/initialized) no llevan id y no devuelven payload
   if (id === undefined || id === null) {
-    if (method && String(method).startsWith("notifications/")) {
-      return null;
-    }
+    return null;
   }
 
   try {
     switch (method) {
       case "initialize": {
+        const clientProtocol = params?.protocolVersion;
+        const supportedVersions = ["2025-03-26", "2024-11-05", "2024-10-07"];
+        const negotiatedVersion = supportedVersions.includes(clientProtocol)
+          ? clientProtocol
+          : "2024-11-05";
+
         return {
           jsonrpc: "2.0",
           id,
           result: {
-            protocolVersion: params?.protocolVersion || "2024-11-05",
+            protocolVersion: negotiatedVersion,
             capabilities: {
               tools: { listChanged: false },
               resources: { subscribe: false, listChanged: false },
               prompts: { listChanged: false }
             },
-            serverInfo: SERVER_INFO
+            serverInfo: SERVER_INFO,
+            instructions:
+              "Servidor MCP oficial de Fondos de Inversión Colectiva (FIC) y Fondos de Capital Privado (FCP) de la Superintendencia Financiera de Colombia (datos.gov.co / qhpu-8ixx)."
           }
         };
       }
@@ -196,7 +200,8 @@ async function handleJsonRpcMessage(
                 arguments: [
                   {
                     name: "entidad_foco",
-                    description: "Nombre de la Sociedad Fiduciaria o Comisionista a destacar (ej. Fiducoldex).",
+                    description:
+                      "Nombre de la Sociedad Fiduciaria o Comisionista a destacar (ej. Fiducoldex).",
                     required: false
                   }
                 ]
@@ -268,12 +273,38 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
+export async function DELETE() {
+  return new NextResponse(null, { status: 200, headers: CORS_HEADERS });
+}
+
 export async function GET(req: NextRequest) {
   if (!checkMcpAuth(req)) {
     return NextResponse.json(
       { error: "Unauthorized. Provide valid Bearer token or api_key." },
       { status: 401, headers: CORS_HEADERS }
     );
+  }
+
+  const accept = req.headers.get("accept") || "";
+  // Si un cliente MCP (SSE legado o Streamable HTTP) abre stream GET con text/event-stream:
+  if (accept.includes("text/event-stream")) {
+    const postUrl = `${req.nextUrl.origin}/api/mcp${req.nextUrl.search}`;
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`event: endpoint\ndata: ${postUrl}\n\n`));
+      }
+    });
+
+    return new NextResponse(stream, {
+      status: 200,
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive"
+      }
+    });
   }
 
   const userToken = extractUserSocrataToken(req);
@@ -315,6 +346,7 @@ export async function POST(req: NextRequest) {
   }
 
   const userToken = extractUserSocrataToken(req);
+  const sessionId = req.headers.get("mcp-session-id") || "mcp-sfc-session";
 
   try {
     const body = await req.json();
@@ -325,17 +357,29 @@ export async function POST(req: NextRequest) {
       ).filter((r) => r !== null);
 
       if (responses.length === 0) {
-        return new NextResponse(null, { status: 202, headers: CORS_HEADERS });
+        return new NextResponse(null, {
+          status: 202,
+          headers: { ...CORS_HEADERS, "Mcp-Session-Id": sessionId }
+        });
       }
-      return NextResponse.json(responses, { status: 200, headers: CORS_HEADERS });
+      return NextResponse.json(responses, {
+        status: 200,
+        headers: { ...CORS_HEADERS, "Mcp-Session-Id": sessionId }
+      });
     }
 
     const response = await handleJsonRpcMessage(body, userToken);
     if (response === null) {
-      return new NextResponse(null, { status: 202, headers: CORS_HEADERS });
+      return new NextResponse(null, {
+        status: 202,
+        headers: { ...CORS_HEADERS, "Mcp-Session-Id": sessionId }
+      });
     }
 
-    return NextResponse.json(response, { status: 200, headers: CORS_HEADERS });
+    return NextResponse.json(response, {
+      status: 200,
+      headers: { ...CORS_HEADERS, "Mcp-Session-Id": sessionId }
+    });
   } catch (err: any) {
     return NextResponse.json(
       {
