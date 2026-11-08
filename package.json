@@ -1,0 +1,22 @@
+{
+  "name": "mcp-sfc-fics-colombia",
+  "version": "1.0.0",
+  "description": "Servidor MCP (Model Context Protocol) sobre HTTPS para Fondos de Inversión Colectiva (FICs) y Fondos de Capital Privado (FCP) de la Superintendencia Financiera de Colombia (SFC - qhpu-8ixx)",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}
